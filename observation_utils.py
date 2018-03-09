@@ -3,11 +3,13 @@ import matplotlib.pyplot as plt
 import pycurl
 import base64
 import re
+import os
 from StringIO import StringIO
 from bs4 import BeautifulSoup
 from astropy import units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, ICRS
+from astropy.io import fits
 import my_binary_psr2
 
 ###########################################
@@ -16,6 +18,7 @@ import my_binary_psr2
 #	mjd_to_orbph
 #       utc_to_bary
 #       eclipse_visibility_plotter
+#       TASC_search
 #	LOFAR_obs_parser
 ###########################################
 
@@ -190,6 +193,79 @@ def observing_threshold(alt, obs_length, steps):
     else:
         alt_thresh = alt[alt_argmax + obs_length_steps/2]
     return alt_thresh
+
+###########################################################################
+
+def TASC_search(datafile, parfile, range=0.1, steps=5e-4):
+    """
+    Step through intervals of the Time of ascending node (TASC) parameter to
+    refold an observation that has lost orbital timing coherence. Searches for
+    the highest S/N profile. NOTE: may need PB=0 in original parfile.
+    datafile : str
+             Name of file containing data to fold.
+    parfile : str
+             Name of original ephemeris file used to fold data.
+    range : float, optional
+             Half fraction of orbital period to search
+             (TASC - PB*range : TASC + PB*range). Default = 10%
+    steps : float, optional
+             Search intervals in units of fractions of orbit. Default = 0.05%
+    """
+    # Read in original .par file
+    with open(parfile,"r+") as f:
+        original = f.read()
+
+    # Extract values
+    try:
+        PB = re.findall('PB\s+0.\d+', original)[0]
+        PB = float(re.findall('0.\d+', PB)[0])
+    except:
+        raise NameError('Could not find	PB in parfile')
+    if 'TASC' in original:
+        TASC = re.findall('TASC\s+\d+.\d+', original)[0]
+        TASC_str = re.findall('\d+.\d+', TASC)[0]
+        TASC = float(TASC_str)
+    elif 'T0' in original:
+        TASC = re.findall('T0\s+\d+.\d+', original)[0]
+        TASC_str = re.findall('\d+.\d+', TASC)[0]
+       	TASC = float(TASC_str)
+    else:
+        raise NameError('Could not find TASC or T0 in parfile')
+
+    steps *= PB  # Convert steps to fraction of PB
+
+    TASC_start = TASC - PB*range
+    TASC_end = TASC + PB*range
+    TASC_arr = np.arange(TASC_start, TASC_end, steps)
+    signal_arr = []
+
+    # Make copy of data to temporary file to work with
+    os.system('cp ' + datafile + ' data_TASC_search.ar')
+
+    for i, tasc in enumerate(TASC_arr):
+        # Modify TASC parameter in .par file
+        new = original.replace(TASC_str, '%.9f' % tasc)
+        temporary_file = parfile + '.tmp'
+        with open(temporary_file, "w+") as f:
+            f.write(new)
+
+        # Fold with new ephemeris
+        os.system('pam -m -E ' + temporary_file + ' data_TASC_search.ar')
+        # Convert to PSRFITS for python
+        os.system('psrconv -o PSRFITS data_TASC_search.ar')
+        # Find max signal
+        hdu = fits.open('data_TASC_search.rf')
+        data = hdu[4].data['DATA']
+        signal = np.nanmean(np.nanmean(data[:, 0], axis=0), axis=0).max()
+        signal_arr.append(signal)
+        # Make counter to output completion every 10%
+        pc_complete = 100. * i / TASC_arr.size
+        if pc_complete % 10 == 0.0:
+            print str(int(pc_complete))+'%'
+
+    np.savetxt('signal_arr.txt', signal_arr)
+    np.savetxt('TASC_arr.txt', TASC_arr)
+    print TASC_arr[signal_arr.argmax()]
 
 ###########################################################################
 
