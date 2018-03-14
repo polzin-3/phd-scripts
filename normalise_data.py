@@ -9,6 +9,7 @@ from astropy.io import fits
 #	Extract_data
 #	Combine_data
 #	norm_multibeam
+#       norm_offpulse_baseline
 #	norm_dm_baseline (inc. baseline_search)
 #	norm_fft_baseline
 #	fluxcal_fit
@@ -82,6 +83,29 @@ def norm_multibeam(on_src_data,off_src_data,b_line=False):
     if b_line is True:
         on_corr -= 1.
     return on_corr
+
+#-----------------------------------------------------------------------------
+
+def norm_offpulse_baseline(data_in, off_left=0, off_right=-1):
+    """
+    Normalise data array by dividing by the mean of the pre-defined off-pulse
+    phase bins in each profile.
+    data_in : numpy.array
+            Input data to be normalised (shape = nsub, nchan, nbin).
+    off_left : int, optional
+            Phase bin number defining the left of the off-pulse region.
+    off_right : int, optional
+       	    Phase bin number defining the right of the off-pulse region.
+    """
+    nsub = data_in.shape[0]
+    nchan = data_in.shape[1]
+    baseline_arr = np.empty((nsub, nchan))
+    for i in range(nsub):
+        for jj in range(nchan):
+            baseline_arr[i, jj] = np.nanmean(data_in[i, jj, off_left:off_right])
+    baseline_arr.shape = nsub, nchan, 1
+    data_out = data_in / baseline_arr - 1
+    return data_out
 
 #-----------------------------------------------------------------------------
 
