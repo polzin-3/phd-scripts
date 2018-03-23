@@ -6,29 +6,54 @@ import scatter_fft
 import dispersion_measure
 
 def dm_2d(
-        data, template,currdm=0 ,dmmin=0 ,dmmax=0 ,dmint=0 ,P=0.0016627,
+        data, template, currdm=0, dmmin=0, dmmax=0, dmint=0, P=0.0016627,
         subfreqs=None, EMsearch=False, free_base=True, free_subbands=False,
         fscr=False, correct_data=False):
     """
-    Find best DM and scattering for each subinterval in data.
-    Template must be 2D (channels, bins).
-    data has shape (intervals, channels, bins).
-    currdm is DM that data is currently dedispersed at.
-    subfreqs (optional) - use if not standard LOFAR HBA channels.
-    P is pulse period in SECONDS.
-    If free_base is True then both baseline and amplitude of template are free
-        parameters.
-    If free_subbands is True then the frequency axis is split into 4 sub-bands
-        each with a separate free amplitude parameter (note: output
-        amplitudes = NaN for this).
-    If fscr is True then the data and template are scrunched to just 4 sub-bands
-        (scrunch applied to template array after dispersion and scattering to
-        account for smearing).
-    If correct_data is True then the input data array will be returned with the
-        best DM's applied; note - this does not correct for scattering!
+    Find best DM and scattering timescale, tau, for each sub-interval in data.
+    Takes input template and disperses + scatters it over the specified range of
+    values, and performs least-squares fit of each template to the sub-intervals
+    of the data. Input template must be phase-aligned and dedispered to same as
+    the out-of-eclipse input data sub-intervals.
+    Function generates, and saves to files, arrays of best-fit chi-squares,
+    template fit amplitudes, and uncertainties on amplitudes for each fit.
+    data : numpy.array
+          Data from which DM and tau are measured
+          data.shape = (intervals, channels, bins)
+    template : numpy.array
+          Template profile to fit to the data. template.shape = (channels, bins)
+    currdm : float, optional
+          DM that data is currently dedispersed at in pc cm^-3.
+    dmmin : float, optional
+          Minimum DM to search in pc cm^-3.
+    dmmax : float, optional
+          Maximum DM to search in pc cm^-3.
+    dmint : float, optional
+          Size of DM in pc cm^-3.
+    P : float, optional
+          Spin period of pulsar in seconds.
+    subfreqs : numpy.array, optional
+          Array of channel centre frequencies (MHz) if different from LOFAR
+          HBA (400 channels).
+    EMsearch : bool, optional
+          If True then includes additional EM term in dispersion, and searches
+          over range 0 - 1 x 10^6 pc cm^-6.
+    free_base : bool, optional
+          If True then baseline of template is free parameter in the fitting.
+    free_subbands : bool, optional
+          If True then channels grouped into 4 'sub-bands', with a separate
+          amplitude free parameter for each group of channels. This goes some
+          way towards accounting for a variable frequency spectrum.
+    fscr : bool, optional
+          If True then the channels in data and template are scrunched to 4
+          sub-bands (scrunch applied to template array after dispersion and
+          scattering to avoid smearing).
+    correct_data : bool, optional
+          If True then the input data array will be returned with the best
+          DM's applied; note - this does not correct for scattering!
     """
     start_time = time.time()
-    intervals = data.shape[0]; channels = data.shape[1]; bins = data.shape[2]
+    intervals, channels, bins = data.shape[0], data.shape[1], data.shape[2]
     binspersec = bins / P
     steps = int(round((dmmax-dmmin) / dmint))
     tscat = np.append(np.arange(1., 50., 2.), np.arange(50., 200., 50.)) / bins
