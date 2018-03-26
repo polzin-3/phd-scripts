@@ -148,22 +148,22 @@ def eclipse_visibility_plotter(radec, mjd_start, mjd_end, time_step=2,
     fig = plt.figure(1)
     ax = fig.add_subplot(111)
     ax.set_ylabel('Elevation (degrees)')
-    ax.set_xlabel('Days from start')
-    ax.hlines(30, 0, mjd_end-mjd_start, linestyles='dashed')   # mark 30 deg el.
-    mjd_plot = mjd_arr - mjd_arr.min()
+    ax.set_xlabel('Hours from start')
+    ax.hlines(0, 0, (mjd_end-mjd_start) * 24., colors='.5', linestyles='dashed')
+    hours_plot = (mjd_arr - mjd_arr.min()) * 24.
     if eclipse_phase_start is None or eclipse_phase_end is None:
         print 'No eclipse range specified by user'
-        for i in range(mjd_plot.size - 1):
+        for i in range(hours_plot.size - 1):
             if alt[i] >= min_alt:
                 lw=3
             else:
                 lw=1
-            ax.plot([mjd_plot[i], mjd_plot[i+1]], [alt[i], alt[i+1]],
+            ax.plot([hours_plot[i], hours_plot[i+1]], [alt[i], alt[i+1]],
                     c=line_col, lw=lw)
     else:
         mjd_arr_barycent = utc_to_bary(mjd_arr, radec, dish_lat, dish_long)
         orbph_arr = mjd_to_orbph(parfile, mjd_arr_barycent, savefile=False)
-        for i in range(mjd_plot.size - 1):
+        for i in range(hours_plot.size - 1):
             if np.logical_and(orbph_arr[i] > eclipse_phase_start,
                               orbph_arr[i] < eclipse_phase_end):
                 col='r'
@@ -173,7 +173,7 @@ def eclipse_visibility_plotter(radec, mjd_start, mjd_end, time_step=2,
                 lw=3
             else:
                 lw=1
-            ax.plot([mjd_plot[i], mjd_plot[i+1]], [alt[i], alt[i+1]], c=col,
+            ax.plot([hours_plot[i], hours_plot[i+1]], [alt[i], alt[i+1]], c=col,
                     lw=lw)
     plt.show()
     return
@@ -265,7 +265,7 @@ def TASC_search(datafile, parfile, range=0.1, steps=5e-4):
 
     np.savetxt('signal_arr.txt', signal_arr)
     np.savetxt('TASC_arr.txt', TASC_arr)
-    print TASC_arr[signal_arr.argmax()]
+    print TASC_arr[np.array(signal_arr).argmax()]
 
 ###########################################################################
 
