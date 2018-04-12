@@ -56,8 +56,11 @@ def dm_2d(
     intervals, channels, bins = data.shape[0], data.shape[1], data.shape[2]
     binspersec = bins / P
     steps = int(round((dmmax-dmmin) / dmint))
-    tscat = np.append(np.arange(1., 50., 2.), np.arange(50., 200., 50.)) / bins
-    #tscat=np.append(np.arange(0.1,1.,0.2),np.arange(1.,70.,5.))  # Karastergiou scattering
+    # New tscat range
+    tscat = np.append(np.arange(1., 50., 2.), np.arange(50., np.float(bins), 50.)) / bins
+    # Old tscat range
+    #tscat = np.append(np.arange(1., 50., 2.), np.arange(50., 200., 50.)) / bins
+    #tscat=np.append(np.arange(0.1,1.,0.2),np.arange(1.,70.,5.)  # Karastergiou scattering
     EMsteps = np.append(np.arange(0., 1.e5, 2.e4), np.arange(1.e5, 1.e6, 5.e4))  # Need this even if not EM searching, originally max = 2.e6
     tmp_fp = np.empty((channels, bins))
     scat_template = np.empty(np.shape(template))
