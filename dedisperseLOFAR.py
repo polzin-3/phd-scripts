@@ -341,7 +341,7 @@ def scrunch_freq(data_in, sigma_in):
     Scrunches the input 2D array to 4 frequency channels
     """
     if data_in.shape[0] == 0:
-        return data_in
+        return data_in, sigma_in
     nbin = data_in.shape[1]
     data_scr = np.empty((4, nbin))
     sigma_scr = np.empty((4, nbin))
@@ -355,7 +355,7 @@ def scrunch_freq(data_in, sigma_in):
                 sigma_in[subset*chanset_size : (subset+1)*chanset_size],
                 axis=0) / np.sqrt(chanset_size)
     else:
-        return data_in
+        return data_in, sigma_in
     return data_scr, sigma_scr
 
 def sigma_flux(fphase, channels, bins):
