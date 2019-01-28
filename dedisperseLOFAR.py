@@ -7,8 +7,7 @@ import dispersion_measure
 
 def dm_2d(
         data, template, currdm=0, dmmin=0, dmmax=0, dmint=0, P=0.0016627,
-        subfreqs=None, EMsearch=False, free_base=True, free_subbands=False,
-        fscr=False, correct_data=False):
+        subfreqs=None, free_base=True, free_subbands=False, fscr=False):
     """
     Find best DM and scattering timescale, tau, for each sub-interval in data.
     Takes input template and disperses + scatters it over the specified range of
@@ -35,9 +34,6 @@ def dm_2d(
     subfreqs : numpy.array, optional
           Array of channel centre frequencies (MHz) if different from LOFAR
           HBA (400 channels).
-    EMsearch : bool, optional
-          If True then includes additional EM term in dispersion, and searches
-          over range 0 - 1 x 10^6 pc cm^-6.
     free_base : bool, optional
           If True then baseline of template is free parameter in the fitting.
     free_subbands : bool, optional
@@ -48,9 +44,6 @@ def dm_2d(
           If True then the channels in data and template are scrunched to 4
           sub-bands (scrunch applied to template array after dispersion and
           scattering to avoid smearing).
-    correct_data : bool, optional
-          If True then the input data array will be returned with the best
-          DM's applied; note - this does not correct for scattering!
     """
     start_time = time.time()
     intervals, channels, bins = data.shape[0], data.shape[1], data.shape[2]
@@ -61,16 +54,16 @@ def dm_2d(
     # Old tscat range
     #tscat = np.append(np.arange(1., 50., 2.), np.arange(50., 200., 50.)) / bins
     #tscat=np.append(np.arange(0.1,1.,0.2),np.arange(1.,70.,5.)  # Karastergiou scattering
-    EMsteps = np.append(np.arange(0., 1.e5, 2.e4), np.arange(1.e5, 1.e6, 5.e4))  # Need this even if not EM searching, originally max = 2.e6
     tmp_fp = np.empty((channels, bins))
     scat_template = np.empty(np.shape(template))
     rfimask = ~np.isnan(np.nanmean(template, axis=1))
     if subfreqs is None:
         subfreqs = np.arange(109.9609376, 187.9882813, 0.1953125)
-        #subfreqs = subfreqs[280:]  # Sub-band filter
+        #subfreqs = subfreqs[200:]  # Sub-band filter
         #rfimask[66:75] = 0  # Needed for sub-band filter [280:]
-        rfimask[:16] = rfimask[138] = rfimask[306] = 0
-        rfimask[346:355] = 0
+        rfimask[:10] = rfimask[138] = rfimask[306] = 0
+        rfimask[346:355] = rfimask[390:400] = 0
+        ##rfimask[146:155] = rfimask[106] = 0       # for subfreqs[200:]
     else:
         ######## German station ########
         ##rfimask[95:98] = rfimask[219:227] = rfimask[304:314] = 0
@@ -89,184 +82,97 @@ def dm_2d(
         data = data[:, ::-1, :].copy()
         template = template[::-1, :].copy()
     max_dm_chan = dm_smear(subfreqs, P, dmmax-currdm)
-    if correct_data:
-        data_new = np.empty(np.shape(data))
 
-    if not EMsearch:
-        snr_arr = np.zeros((intervals, steps, tscat.size+1))
-        chi_arr = np.zeros((intervals, steps, tscat.size+1))
-        sigma_snr_arr = np.zeros((intervals, steps, tscat.size+1))
-        fit_points_arr = np.zeros((intervals, steps, tscat.size+1))
-        start_template_time = time.time()
-        print('Pre-template generation time =',start_template_time-start_time)
-        template_arr = create_templates(
-            template, steps, EMsteps, tscat,channels, bins, currdm, dmint,
-            dmmin, subfreqs, binspersec, tmp_fp, scat_template)
-        end_template_time = time.time()
-        print('Time taken to generate templates =',end_template_time-start_template_time)
-        for ii in range(intervals):
-            start_int_time = time.time()
-            if ii%10 == 0:
-                print ii
-            flux_err = sigma_flux(data[ii], channels, bins)
-            rfiblock = mask_rfi(data[ii], rfimask)
-            for i in range(int(steps)):
-                dm = dmint*i + dmmin
-                rfi_dm_mask = mask_dms(dm-currdm, rfiblock, max_dm_chan)
+    snr_arr = np.zeros((intervals, steps, tscat.size+1))
+    chi_arr = np.zeros((intervals, steps, tscat.size+1))
+    sigma_snr_arr = np.zeros((intervals, steps, tscat.size+1))
+    fit_points_arr = np.zeros((intervals, steps, tscat.size+1))
+    start_template_time = time.time()
+    print('Pre-template generation time =', start_template_time
+                                            - start_time)
+    template_arr = create_templates(
+        template, steps, tscat, channels, bins, currdm, dmint, dmmin, subfreqs,
+        binspersec, tmp_fp, scat_template)
+    end_template_time = time.time()
+    print('Time taken to generate templates =', end_template_time
+                                                    - start_template_time)
+    for ii in range(intervals):
+        start_int_time = time.time()
+        if ii%10 == 0:
+            print ii
+        flux_err = sigma_flux(data[ii], channels, bins)
+        rfiblock = mask_rfi(data[ii], rfimask)
+        for i in range(int(steps)):
+            dm = dmint*i + dmmin
+            rfi_dm_mask = mask_dms(dm-currdm, rfiblock, max_dm_chan)
+            if free_subbands is False:
+                snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
+                    fit_points_arr[ii,i,0] = template_fit1d(
+                        template_arr[i,0][rfi_dm_mask],
+                        data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
+                        free_base=free_base)
+            else:
+                if fscr:
+                    data_input, sigma_input = scrunch_freq(
+                                                data[ii][rfi_dm_mask],
+                                                flux_err[rfi_dm_mask])
+                else:
+                    data_input = data[ii][rfi_dm_mask]
+                    sigma_input = flux_err[rfi_dm_mask]
+                snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
+                    fit_points_arr[ii,i,0] = template_fit_subbands(
+                        rfi_dm_mask, template_arr[i,0][rfi_dm_mask],
+                        data_input, sigma_input, nchan=channels, fscr=fscr)
+            for yy in np.arange(tscat.size):
                 if free_subbands is False:
-                    snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
-                        fit_points_arr[ii,i,0] = template_fit1d(
-                            template_arr[i,0][rfi_dm_mask],
+                    snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
+                        sigma_snr_arr[ii,i,yy+1], \
+                        fit_points_arr[ii,i,yy+1] = template_fit1d(
+                            template_arr[i,yy+1][rfi_dm_mask],
                             data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
                             free_base=free_base)
                 else:
-                    if fscr:
-                        data_input, sigma_input = scrunch_freq(
-                                                    data[ii][rfi_dm_mask],
-                                                    flux_err[rfi_dm_mask])
-                    else:
-                        data_input = data[ii][rfi_dm_mask]
-                        sigma_input = flux_err[rfi_dm_mask]
-                    snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
-                        fit_points_arr[ii,i,0] = template_fit_subbands(
-                            rfi_dm_mask, template_arr[i,0][rfi_dm_mask],
-                            data_input, sigma_input, nchan=channels, fscr=fscr)
-                for yy in np.arange(tscat.size):
-                    if free_subbands is False:
-                        snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
-                            sigma_snr_arr[ii,i,yy+1], \
-                            fit_points_arr[ii,i,yy+1] = template_fit1d(
-                                template_arr[i,yy+1][rfi_dm_mask],
-                                data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
-                                free_base=free_base)
-                    else:
-                        snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
-                            sigma_snr_arr[ii,i,yy+1], \
-                            fit_points_arr[ii,i,yy+1] = template_fit_subbands(
-                                rfi_dm_mask, template_arr[i,yy+1][rfi_dm_mask],
-                                data_input, sigma_input, nchan=channels,
-                                fscr=fscr)
-            if correct_data:
-                min_chi_dm = np.unravel_index(chi_arr[ii].argmin(),
-                                              chi_arr[ii].shape)[0]
-                dm_estimate = dmmin + min_chi_dm*dmint
-                data_new[ii] = dm_rotate(data[ii], -dm_estimate, -currdm, 0.,
-                                         subfreqs, binspersec, channels, tmp_fp)
-            end_int_time = time.time()
-            print('Interval duration =', end_int_time-start_int_time)
-        save_arrays(snr_arr, chi_arr, sigma_snr_arr, fit_points_arr)
-        end_save_time = time.time()
-        print('Total time =',end_save_time-start_time)
-        if correct_data:
-            return data_new
-    else:
-        snr_arr = np.zeros((intervals, steps, EMsteps.size, tscat.size+1))
-        chi_arr = np.zeros((intervals, steps, EMsteps.size, tscat.size+1))
-        sigma_snr_arr = np.zeros((intervals, steps, EMsteps.size,
-                                  tscat.size+1))
-        fit_points_arr = np.zeros((intervals, steps, EMsteps.size,
-                                   tscat.size+1))
-        template_arr = create_templates(
-            template, steps, EMsteps, tscat, channels, bins, currdm, dmint,
-            dmmin, subfreqs, binspersec, tmp_fp, scat_template, EMsearch=True)
-        for ii in range(intervals):
-            if ii%10 == 0:
-                print ii
-            flux_err = sigma_flux(data[ii], channels, bins)
-            rfiblock = mask_rfi(data[ii], rfimask)
-            for i in range(int(steps)):
-                dm = dmint*i + dmmin
-                rfi_dm_mask = mask_dms(dm-currdm, rfiblock, max_dm_chan)
-                for EM in np.arange(EMsteps.size):
-                    if not free_subbands:
-                        snr_arr[ii,i,EM,0], chi_arr[ii,i,EM,0], \
-                            sigma_snr_arr[ii,i,EM,0], \
-                            fit_points_arr[ii,i,EM,0] = template_fit1d(
-                                template_arr[i,EM,0][rfi_dm_mask],
-                                data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
-                                free_base=free_base)
-                    else:
-                        if fscr:
-                            data_input, sigma_input = scrunch_freq(
-                                                        data[ii][rfi_dm_mask],
-                                                        flux_err[rfi_dm_mask])
-                        else:
-                            data_input = data[ii][rfi_dm_mask]
-                            sigma_input = flux_err[rfi_dm_mask]
-                        snr_arr[ii,i,EM,0], chi_arr[ii,i,EM,0], \
-                            sigma_snr_arr[ii,i,EM,0], \
-                            fit_points_arr[ii,i,EM,0] = template_fit_subbands(
-                                rfi_dm_mask, template_arr[i,EM,0][rfi_dm_mask],
-                                data_input, sigma_input, nchan=channels,
-                                fscr=fscr)
-                    for yy in np.arange(tscat.size):
-                        if not free_subbands:
-                            snr_arr[ii,i,EM,yy+1], chi_arr[ii,i,EM,yy+1], \
-                                sigma_snr_arr[ii,i,EM,yy+1], \
-                                fit_points_arr[ii,i,EM,yy+1] = template_fit1d(
-                                    template_arr[i,EM,yy+1][rfi_dm_mask],
-                                    data[ii][rfi_dm_mask],
-                                    flux_err[rfi_dm_mask],
-                                    free_base=free_base)
-                        else:
-                            snr_arr[ii,i,EM,yy+1], chi_arr[ii,i,EM,yy+1], \
-                                sigma_snr_arr[ii,i,EM,yy+1], \
-                                fit_points_arr[ii,i,EM,yy+1] = \
-                                    template_fit_subbands(
-                                        rfi_dm_mask,
-                                        template_arr[i,EM,yy+1][rfi_dm_mask],
-                                        data_input, sigma_input, nchan=channels,
-                                        fscr=fscr)
-        return snr_arr, chi_arr, sigma_snr_arr
+                    snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
+                        sigma_snr_arr[ii,i,yy+1], \
+                        fit_points_arr[ii,i,yy+1] = template_fit_subbands(
+                            rfi_dm_mask, template_arr[i,yy+1][rfi_dm_mask],
+                            data_input, sigma_input, nchan=channels,
+                            fscr=fscr)
+        end_int_time = time.time()
+        print('Interval duration =', end_int_time-start_int_time)
+    save_arrays(snr_arr, chi_arr, sigma_snr_arr, fit_points_arr)
+    end_save_time = time.time()
+    print('Total time =',end_save_time-start_time)
 
 def create_templates(
-        template, steps, EMsteps, tscat, channels, bins, currdm, dmint, dmmin,
-        subfreqs, binspersec, tmp_fp, scat_template, EMsearch=False):
+        template, steps, tscat, channels, bins, currdm, dmint, dmmin, subfreqs,
+        binspersec, tmp_fp, scat_template):
     """
     Using the original dedispersed template, generate a series of new templates
         each dispersed and scattered in steps defined by dmint and tscat.
     Returns array of templates, including the original.
     """
-    if not EMsearch:
-        template_arr = np.empty((steps, tscat.size+1, channels, bins))
-        for i in range(int(steps)):
-            dm = dmint*i + dmmin
-            template_arr[i,0] = dm_rotate(template, dm, currdm, 0., subfreqs,
-                                          binspersec, channels, tmp_fp)
-            for yy in np.arange(tscat.size):
-                for jj in range(channels):
-                    tau = tscat[yy] / (subfreqs[jj]/subfreqs[-1])**4.
-                    scat_template[jj] = scatter_fft.scatter_fft(
-                        template_arr[i,0,jj], tau=tau)
-                    #tau=tscat[yy]/(subfreqs[jj]/subfreqs[-1])**4.  # Karastergiou scat
-                    #scat_template[jj]=scatter_fft.scatter_fft(template_arr[i,0,jj],tau=tau,kscat=True)
-                template_arr[i,yy+1] = scat_template
-    else:
-        template_arr = np.empty((steps, EMsteps.size, tscat.size+1, channels,
-                                 bins))
-        for i in range(int(steps)):
-            dm = dmint*i + dmmin
-            for EM in np.arange(EMsteps.size):
-                template_arr[i,EM,0] = dm_rotate(template, dm, currdm,
-                                                 EMsteps[EM], subfreqs,
-                                                 binspersec, channels, tmp_fp)
-                for yy in np.arange(tscat.size):
-                    for jj in range(channels):
-                        tau = tscat[yy] / (subfreqs[jj]/subfreqs[-1])**4.
-                        scat_template[jj] = scatter_fft.scatter_fft(
-                            template_arr[i,EM,0,jj], tau=tau)
-                        #tau=tscat[yy]/(subfreqs[jj]/subfreqs[-1])**4.  # Karastergiou scat
-                        #scat_template[jj]=scatter_fft.scatter_fft(template_arr[i,EM,0,jj],tau=tau,kscat=True)
-                    template_arr[i,EM,yy+1] = scat_template
+    template_arr = np.empty((steps, tscat.size+1, channels, bins))
+    for i in range(int(steps)):
+        dm = dmint*i + dmmin
+        template_arr[i,0] = dm_rotate(template, dm, currdm, subfreqs,
+                                      binspersec, channels, tmp_fp)
+        for yy in np.arange(tscat.size):
+            for jj in range(channels):
+                tau = tscat[yy] / (subfreqs[jj]/subfreqs[-1])**4.
+                scat_template[jj] = scatter_fft.scatter_fft(
+                    template_arr[i,0,jj], tau=tau)
+                #tau=tscat[yy]/(subfreqs[jj]/subfreqs[-1])**4.  # Karastergiou scat
+                #scat_template[jj]=scatter_fft.scatter_fft(template_arr[i,0,jj],tau=tau,kscat=True)
+            template_arr[i,yy+1] = scat_template
     return template_arr
 
-def dm_rotate(template, dm, currdm, EM, subfreqs, binspersec, channels, tmp_fp):
+def dm_rotate(template, dm, currdm, subfreqs, binspersec, channels, tmp_fp):
     """
     Rotate channels of input template in pulse phase. Delay in each channel
         assumes cold plasma dispersion law (i.e. freq^{-2}) - see psr_utils.py
     """
-    subdelays = (psr_utils.delay_from_DM(dm-currdm, subfreqs) 
-                 + EM/(4*subfreqs**4))
+    subdelays = psr_utils.delay_from_DM(dm-currdm, subfreqs)
     #hifreqdelay = subdelays[-1]
     #subdelays = subdelays-hifreqdelay
     delaybins = subdelays * binspersec
@@ -399,7 +305,7 @@ def template_fit1d(x, y, sigma=1., free_base=False):
         sxx = (x * x * np.reciprocal(sigma**2)).sum()
         amplitude = sxy / sxx
         baseline = 0
-        sigma_amp = np.sqrt(ss) * (sx/sxx)
+        sigma_amp = np.sqrt((sx/sxx)**2 * (sigma**2).sum())
     chi2 = (((y - baseline - amplitude*x) * np.reciprocal(sigma))**2).sum()
     fit_points = y.size  # Number of data points used in fit
     return amplitude, chi2, sigma_amp, fit_points
