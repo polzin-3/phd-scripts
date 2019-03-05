@@ -6,47 +6,84 @@ from scipy import optimize
 # Contents:
 #	Powerlaw_fit
 #	Fermi_fit
+#       Template_fit_1D
 #	fit_line_nr (Rene's function)
 #	py_2_ascii (3 funcs)
 ###########################################
 
-def Powerlaw_fit(x,y=1.,yerr=None):
+def Powerlaw_fit(x, y=1., yerr=None, output='final', loglog=False):
+    """
+    Solves analytical least sq using log(x) and log(y). Note that this assumes
+    normally distributed points (unlikely to be the case after log conversion).
+    output : str, optional
+          'none' to stop fitted parameter values being printed to screen
+          'final' to print final fitted values to screen
+          'full' to print intermediate parameter values from log-log fit, and
+               final values from curve_fit.
+    loglog : bool, optional
+          If True, performs only linear fit to log-transform of x and y. Note
+              that this assumes normally distributed points (unlikely to be the
+              case after log conversion).
+          If False, uses parameter values from log-log fit as initial guess for
+              non-linear fit to data, properly accounting for uncertainties.
+              This makes use of the scipy.optimize.curve_fit function.
+    """
     if yerr is None:
-        yerr=np.ones(y.size)
-    tmp_mask=y==0.
-    y[tmp_mask]=np.nan
-    mask=np.isnan(y)
-    xdata=x[~mask]
-    ydata=y[~mask]
-    ydata_err=yerr[~mask]
-    logx=log10(xdata)
-    logy=log10(ydata)
-    logyerr=ydata_err/ydata
-    fit=fit_line_nr(logy,x=logx,err=logyerr)
-    alpha=fit[0][1]; amp=10**fit[0][0]
-    alpha_err=fit[1][1]; amp_err=fit[1][0]*amp
-    print 'amplitude = '+str(amp)+' +/- '+str(amp_err)
-    print 'alpha = '+str(alpha)+' +/- '+str(alpha_err)
-    return alpha,alpha_err
+        yerr = np.ones(y.size)
+    tmp_mask = y == 0.
+    y[tmp_mask] = np.nan
+    mask = np.isnan(y)
+    xdata = x[~mask]
+    ydata = y[~mask]
+    ydata_err = yerr[~mask]
+    logx = log10(xdata)
+    logy = log10(ydata)
+    logyerr = ydata_err / ydata
+    fit = fit_line_nr(logy, x=logx, err=logyerr)
+    alpha = fit[0][1]
+    amp = 10 ** fit[0][0]
+    alpha_err = fit[1][1]
+    amp_err = fit[1][0] * amp
+    if output == 'full':
+        print 'amplitude_loglog = '+str(amp)+' +/- ' + str(amp_err)
+        print 'alpha_loglog = '+str(alpha)+' +/- ' + str(alpha_err)
+    if loglog:
+        return alpha, amp, alpha_err, amp_err
+    else:
+        # curve_fit
+        p0 = [amp, alpha]
+        fitfunc = lambda x, a, b: a * x ** b
+        p1, p1_cov = optimize.curve_fit(fitfunc, xdata, ydata, p0[:], ydata_err)
+        uncertainty = np.sqrt(np.diag(p1_cov))
+        amp = p1[0]
+        alpha = p1[1]
+        amp_err = uncertainty[0]
+        alpha_err = uncertainty[1]
+        if np.logical_or(output == 'full', output == 'final'):
+            print 'amplitude = '+str(amp)+' +/- ' + str(amp_err)
+            print 'alpha = '+str(alpha)+' +/- ' + str(alpha_err)
+        return alpha, amp, alpha_err, amp_err
 
 #---------------------------------------------------------------------------------------
 
-def Fermi_fit(x,y=1.,sigma=1.,a=1.,b=1.):
+def Fermi_fit(x, y=1., sigma=1., a=1., b=1.):
     """
     Fit Fermi-Dirac function, y = 1 / (exp((x + a)/b) + 1)
     x,y - input data
     a,b - initial parameter estimates (floats)
     """
-    mask=~np.isnan(y)
-    p0=[a,b]
-    fitfunc=lambda x,a,b: 1./(np.exp((x+a)/b)+1)
-    p1,p1_cov=optimize.curve_fit(fitfunc,x[mask],y[mask],p0[:],sigma[mask])
-    uncertainty=np.sqrt(np.diag(p1_cov))
-    print 'a =',p1[0],'+/-',uncertainty[0]
-    print 'b =',p1[1],'+/-',uncertainty[1]
-    return p1,p1_cov
+    mask = ~np.isnan(y)
+    p0 = [a,b]
+    fitfunc = lambda x, a, b: 1. / (np.exp((x+a) / b) + 1)
+    p1, p1_cov = optimize.curve_fit(fitfunc, x[mask], y[mask], p0[:],
+                                    sigma[mask])
+    uncertainty = np.sqrt(np.diag(p1_cov))
+    if output=='full':
+        print 'a_logfit =',p1[0],'+/-',uncertainty[0]
+        print 'b_logfit =',p1[1],'+/-',uncertainty[1]
+    return p1, p1_cov
 
-#---------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 
 # From Rene Breton hulk:/home/bretonr/lib/python/bretonr_utils.py
 def fit_line_nr(y, x=None, err=1.0, m=None, b=None, short=None, output=None):
