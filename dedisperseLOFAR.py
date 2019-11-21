@@ -1,9 +1,8 @@
 import numpy as np
 from scipy import optimize
 import time
-import psr_utils
+#from psr_utils import delay_from_DM, fft_rotate
 import scatter_fft
-import dispersion_measure
 
 def dm_2d(
         data, template, currdm=0, dmmin=0, dmmax=0, dmint=0, P=0.0016627,
@@ -14,48 +13,57 @@ def dm_2d(
     values, and performs least-squares fit of each template to the sub-intervals
     of the data. Input template must be phase-aligned and dedispered to same as
     the out-of-eclipse input data sub-intervals.
-    Function generates, and saves to files, arrays of best-fit chi-squares,
+    
+    Function generates, and saves to disk, arrays of best-fit chi-squares,
     template fit amplitudes, and uncertainties on amplitudes for each fit.
-    data : numpy.array
-          Data from which DM and tau are measured
-          data.shape = (intervals, channels, bins)
-    template : numpy.array
-          Template profile to fit to the data. template.shape = (channels, bins)
+    
+    Parameters
+    ----------
+    data : numpy.ndarray
+        Data from which DM and tau are measured
+        data.shape = (intervals, channels, bins)
+    template : numpy.ndarray
+        Template profile to fit to the data. template.shape = (channels, bins)
     currdm : float, optional
-          DM that data is currently dedispersed at in pc cm^-3.
+        DM that data is currently dedispersed at in pc cm^-3.
     dmmin : float, optional
-          Minimum DM to search in pc cm^-3.
+        Minimum DM to search in pc cm^-3.
     dmmax : float, optional
-          Maximum DM to search in pc cm^-3.
+        Maximum DM to search in pc cm^-3.
     dmint : float, optional
-          Size of DM in pc cm^-3.
+        Size of DM in pc cm^-3.
     P : float, optional
-          Spin period of pulsar in seconds.
+        Spin period of pulsar in seconds.
     subfreqs : numpy.array, optional
-          Array of channel centre frequencies (MHz) if different from LOFAR
-          HBA (400 channels).
+        Array of channel centre frequencies (MHz) if different from LOFAR
+        HBA (400 channels).
     free_base : bool, optional
-          If True then baseline of template is free parameter in the fitting.
+        If True then baseline of template is free parameter in the fitting.
     free_subbands : bool, optional
-          If True then channels grouped into 4 'sub-bands', with a separate
-          amplitude free parameter for each group of channels. This goes some
-          way towards accounting for a variable frequency spectrum.
+        If True then channels grouped into 4 'sub-bands', with a separate
+        amplitude free parameter for each group of channels. This goes some
+        way towards accounting for a variable frequency spectrum.
     fscr : bool, optional
-          If True then the channels in data and template are scrunched to 4
-          sub-bands (scrunch applied to template array after dispersion and
-          scattering to avoid smearing).
+        If True then the channels in data and template are scrunched to 4
+        sub-bands (scrunch applied to template array after dispersion and
+        scattering to avoid smearing).
+        
     """
     start_time = time.time()
-    intervals, channels, bins = data.shape[0], data.shape[1], data.shape[2]
+    intervals, channels, bins = data.shape
     binspersec = bins / P
-    steps = int(round((dmmax-dmmin) / dmint))
-    # New tscat range
-    tscat = np.append(np.arange(1., 50., 2.), np.arange(50., np.float(bins), 50.)) / bins
+    DMs = np.arange(dmmin, dmmax, dmint)
+    # New scattering timescale range to search over
+    tscat = np.append(np.arange(1., 50., 2.),
+                      np.arange(50., bins, 50.)) / bins
     # Old tscat range
-    #tscat = np.append(np.arange(1., 50., 2.), np.arange(50., 200., 50.)) / bins
-    #tscat=np.append(np.arange(0.1,1.,0.2),np.arange(1.,70.,5.)  # Karastergiou scattering
-    tmp_fp = np.empty((channels, bins))
-    scat_template = np.empty(np.shape(template))
+    #tscat = np.append(np.arange(1., 50., 2.),
+    #                  np.arange(50., 200., 50.)) / bins
+    #tscat = np.append(np.arange(0.1,1.,0.2),
+    #                  np.arange(1.,70.,5.)  # Karastergiou scattering
+    if tscat[0] != 0:
+        tscat = np.insert(tscat, 0, 0)
+    # mask all bad frequency channels
     rfimask = ~np.isnan(np.nanmean(template, axis=1))
     if subfreqs is None:
         subfreqs = np.arange(109.9609376, 187.9882813, 0.1953125)
@@ -77,108 +85,121 @@ def dm_2d(
         ############ Lovell ############
         rfimask[0] = 0
     if subfreqs[1] - subfreqs[0] < 0.:
-        subfreqs = subfreqs[::-1].copy()
-        rfimask = rfimask[::-1].copy()
-        data = data[:, ::-1, :].copy()
-        template = template[::-1, :].copy()
+        # reverse to ascending order
+        subfreqs = subfreqs[::-1]
+        rfimask = rfimask[::-1]
+        data = data[:, ::-1, :]
+        template = template[::-1, :]
+    # find maximum allowed DM within a channel
     max_dm_chan = dm_smear(subfreqs, P, dmmax-currdm)
-
-    snr_arr = np.zeros((intervals, steps, tscat.size+1))
-    chi_arr = np.zeros((intervals, steps, tscat.size+1))
-    sigma_snr_arr = np.zeros((intervals, steps, tscat.size+1))
-    fit_points_arr = np.zeros((intervals, steps, tscat.size+1))
-    start_template_time = time.time()
-    print('Pre-template generation time =', start_template_time
-                                            - start_time)
-    template_arr = create_templates(
-        template, steps, tscat, channels, bins, currdm, dmint, dmmin, subfreqs,
-        binspersec, tmp_fp, scat_template)
-    end_template_time = time.time()
-    print('Time taken to generate templates =', end_template_time
-                                                    - start_template_time)
-    for ii in range(intervals):
+    # define empty arrays to fill with results
+    snr_arr = np.zeros((intervals, DMs.size, tscat.size))
+    chi_arr = np.zeros((intervals, DMs.size, tscat.size))
+    sigma_snr_arr = np.zeros((intervals, DMs.size, tscat.size))
+    fit_points_arr = np.zeros((intervals, DMs.size, tscat.size))
+    
+    # Loop over sub-integrations of data
+    for itvl in range(intervals):
         start_int_time = time.time()
-        if ii%10 == 0:
-            print ii
-        flux_err = sigma_flux(data[ii], channels, bins)
-        rfiblock = mask_rfi(data[ii], rfimask)
-        for i in range(int(steps)):
-            dm = dmint*i + dmmin
+        if itvl%10 == 0:
+            print(itvl)
+        flux_err = sigma_flux(data[itvl], channels, bins)
+        rfiblock = mask_rfi(data[itvl], rfimask)
+        # Loop over DMs
+        for i_dm, dm in enumerate(DMs):
             rfi_dm_mask = mask_dms(dm-currdm, rfiblock, max_dm_chan)
-            if free_subbands is False:
-                snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
-                    fit_points_arr[ii,i,0] = template_fit1d(
-                        template_arr[i,0][rfi_dm_mask],
-                        data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
-                        free_base=free_base)
-            else:
+            if free_subbands:
                 if fscr:
                     data_input, sigma_input = scrunch_freq(
-                                                data[ii][rfi_dm_mask],
-                                                flux_err[rfi_dm_mask])
+                            data[itvl][rfi_dm_mask], flux_err[rfi_dm_mask])
                 else:
-                    data_input = data[ii][rfi_dm_mask]
+                    data_input = data[itvl][rfi_dm_mask]
                     sigma_input = flux_err[rfi_dm_mask]
-                snr_arr[ii,i,0], chi_arr[ii,i,0], sigma_snr_arr[ii,i,0], \
-                    fit_points_arr[ii,i,0] = template_fit_subbands(
-                        rfi_dm_mask, template_arr[i,0][rfi_dm_mask],
-                        data_input, sigma_input, nchan=channels, fscr=fscr)
-            for yy in np.arange(tscat.size):
-                if free_subbands is False:
-                    snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
-                        sigma_snr_arr[ii,i,yy+1], \
-                        fit_points_arr[ii,i,yy+1] = template_fit1d(
-                            template_arr[i,yy+1][rfi_dm_mask],
-                            data[ii][rfi_dm_mask], flux_err[rfi_dm_mask],
-                            free_base=free_base)
-                else:
-                    snr_arr[ii,i,yy+1], chi_arr[ii,i,yy+1], \
-                        sigma_snr_arr[ii,i,yy+1], \
-                        fit_points_arr[ii,i,yy+1] = template_fit_subbands(
-                            rfi_dm_mask, template_arr[i,yy+1][rfi_dm_mask],
+            # Loop over scattering timescales
+            for i_ts, ts in enumerate(tscat):
+                # dedisperse and scatter template
+                template_new = create_template(template, dm, ts, currdm,
+                                               subfreqs, binspersec)
+                # fit template to data
+                if free_subbands:
+                    snr_arr[itvl,i_dm,i_ts], chi_arr[itvl,i_dm,i_ts], \
+                        sigma_snr_arr[itvl,i_dm,i_ts], \
+                        fit_points_arr[itvl,i_dm,i_ts] = template_fit_subbands(
+                            rfi_dm_mask, template_new[rfi_dm_mask],
                             data_input, sigma_input, nchan=channels,
                             fscr=fscr)
+                else:
+                    snr_arr[itvl,i_dm,i_ts], chi_arr[itvl,i_dm,i_ts], \
+                        sigma_snr_arr[itvl,i_dm,i_ts], \
+                        fit_points_arr[itvl,i_dm,i_ts] = template_fit1d(
+                            template_new[rfi_dm_mask],
+                            data[itvl][rfi_dm_mask], flux_err[rfi_dm_mask],
+                            free_base=free_base)
+                        
         end_int_time = time.time()
         print('Interval duration =', end_int_time-start_int_time)
     save_arrays(snr_arr, chi_arr, sigma_snr_arr, fit_points_arr)
     end_save_time = time.time()
     print('Total time =',end_save_time-start_time)
 
-def create_templates(
-        template, steps, tscat, channels, bins, currdm, dmint, dmmin, subfreqs,
-        binspersec, tmp_fp, scat_template):
+def create_template(template, dm, tscat, currdm, subfreqs, binspersec):
     """
-    Using the original dedispersed template, generate a series of new templates
-        each dispersed and scattered in steps defined by dmint and tscat.
-    Returns array of templates, including the original.
+    Disperse and scatter input template by amounts dmint and tscat,
+    respectively.
     """
-    template_arr = np.empty((steps, tscat.size+1, channels, bins))
-    for i in range(int(steps)):
-        dm = dmint*i + dmmin
-        template_arr[i,0] = dm_rotate(template, dm, currdm, subfreqs,
-                                      binspersec, channels, tmp_fp)
-        for yy in np.arange(tscat.size):
-            for jj in range(channels):
-                tau = tscat[yy] / (subfreqs[jj]/subfreqs[-1])**4.
-                scat_template[jj] = scatter_fft.scatter_fft(
-                    template_arr[i,0,jj], tau=tau)
-                #tau=tscat[yy]/(subfreqs[jj]/subfreqs[-1])**4.  # Karastergiou scat
-                #scat_template[jj]=scatter_fft.scatter_fft(template_arr[i,0,jj],tau=tau,kscat=True)
-            template_arr[i,yy+1] = scat_template
-    return template_arr
+    channels, bins = template.shape
+    template_new = dm_rotate(template, dm, currdm, subfreqs, binspersec,
+                             channels)
+    if tscat != 0:
+        for chan in range(channels):
+            tau = tscat / (subfreqs[chan] / subfreqs[-1])**4.
+            template_new[chan] = scatter_fft.scatter_fft(template_new[chan],
+                                                         tau=tau)
+    return template_new
 
-def dm_rotate(template, dm, currdm, subfreqs, binspersec, channels, tmp_fp):
+def dm_rotate(template, dm, currdm, subfreqs, binspersec, channels):
     """
     Rotate channels of input template in pulse phase. Delay in each channel
         assumes cold plasma dispersion law (i.e. freq^{-2}) - see psr_utils.py
     """
-    subdelays = psr_utils.delay_from_DM(dm-currdm, subfreqs)
+    subdelays = delay_from_DM(dm-currdm, subfreqs)
+    
     #hifreqdelay = subdelays[-1]
     #subdelays = subdelays-hifreqdelay
     delaybins = subdelays * binspersec
-    tmp_fp = np.array([psr_utils.fft_rotate(row, -delaybins[num])
+    tmp_fp = np.array([fft_rotate(row, -delaybins[num])
                        for num,row in enumerate(template)])
     return tmp_fp
+
+#####################################################
+def delay_from_DM(DM, freq_emitted):
+    """
+    Return the delay in seconds caused by dispersion, given
+    a Dispersion Measure (DM) in cm-3 pc, and the emitted
+    frequency (freq_emitted) of the pulsar in MHz.
+    """
+    if (type(freq_emitted)==type(0.0)):
+        if (freq_emitted > 0.0):
+            return DM/(0.000241*freq_emitted*freq_emitted)
+        else:
+            return 0.0
+    else:
+        return np.where(freq_emitted > 0.0,
+                         DM/(0.000241*freq_emitted*freq_emitted), 0.0)
+
+def fft_rotate(arr, bins):
+    """
+    fft_rotate(arr, bins):
+        Return array 'arr' rotated by 'bins' places to the left.  The
+            rotation is done in the Fourier domain using the Shift Theorem.
+            'bins' can be fractional.  The resulting vector will have
+            the same length as the original.
+    """
+    arr = np.asarray(arr)
+    freqs = np.arange(arr.size/2+1, dtype=np.float)
+    phasor = np.exp(complex(0.0, 6.283185307179586) * freqs * bins / float(arr.size))
+    return np.fft.irfft(phasor * np.fft.rfft(arr), arr.size)
+##################################################
 
 def dm_smear(subfreqs, P, max_dm_search):
     """
@@ -225,19 +246,19 @@ def save_arrays(snr_arr, chi_arr, sigma_snr_arr, fit_points_arr):
     This flattens as ((subints, dm_steps, tau_steps)) --> 
         ((subints * dm_steps, tau_steps)).
     """
-    with file('snr_arr.txt','w') as outfile:
+    with open('snr_arr.txt','w') as outfile:
         for data_slice in snr_arr:
             np.savetxt(outfile,data_slice)
             outfile.write('# New slice\n')
-    with file('chi_arr.txt','w') as outfile:
+    with open('chi_arr.txt','w') as outfile:
         for data_slice in chi_arr:
             np.savetxt(outfile,data_slice)
             outfile.write('# New slice\n')
-    with file('sigma_snr_arr.txt','w') as outfile:
+    with open('sigma_snr_arr.txt','w') as outfile:
         for data_slice in sigma_snr_arr:
             np.savetxt(outfile,data_slice)
             outfile.write('# New slice\n')
-    with file('fit_points_arr.txt','w') as outfile:
+    with open('fit_points_arr.txt','w') as outfile:
         for data_slice in fit_points_arr:
             np.savetxt(outfile,data_slice)
             outfile.write('# New slice\n')
