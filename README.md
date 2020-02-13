@@ -1,7 +1,7 @@
 # phd-scripts
 Mix of python scripts developed throughout my PhD  for use with radio astronomy data.
 
-The majority of these scripts are short, quick scripts to perform repeatable tasks on radio astronomy data (often specific for my use).
+The majority of these scripts are short, quick scripts to perform repeatable tasks on radio astronomy data. They were written specificly for my use cases, and definitely **not optimised**, so feel free to take them and improve.
 
 dedidisperseLOFAR.py, observation_utils.py and normalise_data.py are the most in-depth, containing a number of functions that can be generally applied to data from different telescopes.
 
