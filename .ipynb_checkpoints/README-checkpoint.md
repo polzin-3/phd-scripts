@@ -15,7 +15,7 @@ The input data should have sub-integrations, frequency channelisation, and pulse
 
 The input template is equally important in the success of the method. It should have as high signal-to-noise as possible, and be representative of the true pulse shape of the pulsar. A generally good method, if you have the available data, is to sum observed data over a long duration (out-of-eclipse and dedispersed) to give a relatively high S/N 2D template (freq chan, pulse phase) that can be further improved by applying a smoothing algorithm (e.g. Savitzky-Golay filter) to reduce noise. If you are using a full de-dispersed template, then it must be accurately phase-aligned with the data that you are trying to measure. For an eclipsing pulsar this can be achieved by cross-correlating the template with the de-dispersed, out-of-eclipse part of the observed data (see template_2d from normalise_data.py).
 
-The output data: chi-square array (best-fit chi-square for each DM & tau), amplitude array (template scale factor for best-fit of each DM & tau) and amplitude error array (corresponding scale factor fit errors, not accounting for uncertainty in DM & tau), are saved to disk upon completion. How to interpret these...
+The output data: chi-square array (best-fit chi-square for each sub-integration, DM & tau), amplitude array (template scale factor for best-fit of each sub-int, DM & tau) and amplitude error array (corresponding scale factor fit errors, not accounting for uncertainty in DM & tau), are saved to disk (as .txt) upon completion. When reading these into python you will first need to reshape the arrays into ((# of sub-ints, # of DMs, # of tau)). An automatic plot of the ...
 
 ## normalise_data.py
 ---

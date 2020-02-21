@@ -48,7 +48,7 @@ def dm_2d(
     dmmax : float, optional
         Maximum DM to search in pc cm^-3.
     dmint : float, optional
-        Size of DM in pc cm^-3.
+        Size of DM steps in pc cm^-3.
     P : float, optional
         Spin period of pulsar in seconds.
     subfreqs : numpy.array, optional
