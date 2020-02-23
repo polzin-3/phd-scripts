@@ -50,11 +50,12 @@ def bestparams(chi_arr, dmmin=0., dmint=1.):
            tscat_1sig_low, tscat_1sig_high
 
 def params_vs_time(
-        chi_arr, dmmin=0., dmint=1., currdm=0., subint_start=0, orbph=None,
-        fignum=1, bins=256., telescope=None):
+        chi_arr, dmmin=0., dmint=1., currdm=0., snr_arr=None, sigma_arr=None,
+        subint_start=0, orbph=None, fignum=1, bins=256., telescope=None):
     """
-    Outputs contour plots of DM or tscat vs subint with 1, 2 and 3 sigma
-    contours at 68.3%, 95.4% and 99.73% uncertainty levels.
+    Outputs contour plots of DM and tau vs subint with 1, 2 and 3 sigma
+    contours at 68.3%, 95.4% and 99.73% uncertainty levels, based on chi-sq
+    values of fits to data using different combinations of DM and tau.
     
     Parameters
     ----------
@@ -67,16 +68,36 @@ def params_vs_time(
         Size of DM steps in pc cm^-3
     currdm : float, optional
         DM that data is currently dedispersed at in pc cm^-3
-    subint_start : int
-    
+    snr_arr : numpy.ndarray, optional
+        Array of template scale-factors (see dedisperse_eclipse.py) with
+        shape ((N_subints, N_dm, N_tau)). If provided then the values
+        corresponding to the lowest chi-sq fit per sub-integration will be
+        plotted along with the DM and tau contour plots
+    sigma_arr : numpy.ndarray, optional
+        Array of template scale-factors uncertainties
+        (see dedisperse_eclipse.py) with shape ((N_subints, N_dm, N_tau)).
+        If provided then the values corresponding to the lowest chi-sq fit
+        per sub-integration will be plotted as errorbars for the
+        scale-factor plot
+    subint_start : int, optional
+        First x-axis tick label, if the fits were made to only a subset of
+        the data
+    orbph : numpy.array or list, optional
+        Orbital phases for each sub-integration of data to use as x-axis. If
+        not provided then sub-integration number is used. If subint-start and
+        orbph are provided then orbph will be subset as
+        orbph[subint_start:subint_start+Nsubint]
+    fignum : int, optional
+        Matplotlib figure number, if different from 1
+    bins : int, optional
+        Number of pulse phase bins in data that was used in fits, if different
+        from 256
     telescope : string
         Used to scale tau to centre frequency of observation.
         options : 'LOFAR' (148.9 MHz), 'WSRT' (345.6 MHz), 'GMRT' (650 MHz),
                   'Parkes' (1369 MHz), 'Lovell' (1532 MHz)
     """
-    Ndm = chi_arr.shape[1]
-    Nsubint = chi_arr.shape[0]
-    Ntscat = chi_arr.shape[2]
+    Nsubint, Ndm, Ntscat = chi_arr.shape
     tmp_arr = chi_arr.copy()
     dm_time = np.empty((Ndm, Nsubint))
     tscat_time = np.empty((Ntscat, Nsubint))
@@ -88,7 +109,6 @@ def params_vs_time(
     tscats = np.append(np.arange(1., 50., 2.),
                        np.arange(50., np.float(bins), 50.)) / np.float(bins)
     tscats = np.append(0, tscats)
-
     # ratio of band centre to band top
     tel_dict = {'LOFAR':(148.9 / 187.9), 'WSRT':(345.6 / 381.2),
                 'GMRT':(650. / 750.), 'Parkes':(1369. / 1496.75),
@@ -102,58 +122,98 @@ def params_vs_time(
     # sub-integration indices
     subints = np.arange(subint_start, subint_start + Nsubint)
     # Delta chi-square values for 2 variables:
-    onesig = 2.3   # was 1., 4., 9. originally for some reason...?
+    onesig = 2.3     # was 1., 4., 9. originally?
     twosig = 6.17
     threesig = 11.8
-    for i in np.arange(Nsubint):
+    for i in range(Nsubint):
         tmp_arr[i] -= np.min(tmp_arr[i])
         dm_time[:, i] = tmp_arr[i].min(axis=1)
         tscat_time[:, i] = tmp_arr[i].min(axis=0)
     if orbph is not None:
-        x_ax = orbph[subint_start:subint_start+Nsubint]
+        x_ax = orbph[subint_start : subint_start+Nsubint]
         x_lab = 'Orbital Phase'
     else:
         x_ax = subints
         x_lab = 'Sub-integration'
-    #f=plt.figure(fignum,figsize=(4.8,3.6))
     f = plt.figure(fignum)
-    #f.subplots_adjust(hspace=0, left=0.19, right=0.98, bottom=0.14,
-    #                  top=0.97)
     f.subplots_adjust(hspace=0)
-    ax = f.add_subplot(312, ylabel=r'$\Delta$DM (pc cm$^{-3}$)',
-                        xticklabels=[])
-    #ax = f.add_subplot(211, ylabel=r'DM (pc cm$^{-3}$)',
-    #                   xticklabels=[])
-    ax.contourf(x_ax, dms-currdm, dm_time,
-                levels=[0, onesig, twosig, threesig], cmap='copper')
-    ax.contour(x_ax, dms-currdm, dm_time,
-                levels=[onesig, twosig, threesig], colors='black')
-    #ax.set_yticks([0.0, 0.002, 0.004, 0.006])
-    #ax.set_ylim(-0.0004, 0.0072)
-    ax.tick_params(direction='out')
-    ax2 = f.add_subplot(313, xlabel=x_lab, ylabel=r'$\Delta\tau$ (P)')
-    #ax2 = f.add_subplot(212, xlabel=x_lab, ylabel=r'$\tau$ (P)')
-    ax2.contourf(x_ax, tau_cf, tscat_time,
-                 levels=[0, onesig, twosig, threesig], cmap='copper')
-    ax2.contour(x_ax, tau_cf, tscat_time,
-                levels=[onesig, twosig, threesig], colors='black')
-    ax2.tick_params(direction='out')
-    plt.show()
+    if snr_arr is None:
+        ax = f.add_subplot(211, ylabel=r'$\Delta$DM (pc cm$^{-3}$)',
+                           xticklabels=[])
+        ax.contourf(x_ax, dms-currdm, dm_time,
+                    levels=[0, onesig, twosig, threesig], cmap='copper')
+        ax.contour(x_ax, dms-currdm, dm_time,
+                    levels=[onesig, twosig, threesig], colors='black')
+        ax.tick_params(direction='out')
+        ax2 = f.add_subplot(212, xlabel=x_lab, ylabel=r'$\Delta\tau$ (P)')
+        ax2.contourf(x_ax, tau_cf, tscat_time,
+                     levels=[0, onesig, twosig, threesig], cmap='copper')
+        ax2.contour(x_ax, tau_cf, tscat_time,
+                    levels=[onesig, twosig, threesig], colors='black')
+        ax2.tick_params(direction='out')
+        plt.show()
+    else:
+        # Find template scale-factor corresponding to lowest chi-sq fits
+        snr_fit = np.empty(Nsubint)
+        sigma = np.empty(Nsubint)
+        for i in range(Nsubint):
+            coord = np.unravel_index(chi_arr[i].argmin(), chi_arr[i].shape)
+            snr_fit[i] = snr_arr[i][coord]
+            if sigma_arr is not None:
+                sigma[i] = sigma_arr[i][coord]
+        ax = f.add_subplot(311, ylabel='Best fit amplitude', xticklabels=[])
+        if sigma_arr is not None:
+            ax.errorbar(x_ax, snr_fit, sigma)
+        else:
+            ax.plot(x_ax, snr_fit)
+        ax = f.add_subplot(312, ylabel=r'$\Delta$DM (pc cm$^{-3}$)',
+                            xticklabels=[])
+        ax.contourf(x_ax, dms-currdm, dm_time,
+                    levels=[0, onesig, twosig, threesig], cmap='copper')
+        ax.contour(x_ax, dms-currdm, dm_time,
+                    levels=[onesig, twosig, threesig], colors='black')
+        ax.tick_params(direction='out')
+        ax2 = f.add_subplot(313, xlabel=x_lab, ylabel=r'$\Delta\tau$ (P)')
+        ax2.contourf(x_ax, tau_cf, tscat_time,
+                     levels=[0, onesig, twosig, threesig], cmap='copper')
+        ax2.contour(x_ax, tau_cf, tscat_time,
+                    levels=[onesig, twosig, threesig], colors='black')
+        ax2.tick_params(direction='out')
+        plt.show()
 
-def best_fit_amplitude(chi_arr,snr_arr,subint_start=0):
+def best_fit_amplitude(chi_arr, snr_arr, subint_start=0, fignum=1):
     """
     Plots the amplitude of the template that produces the best fit to the data
     i.e. that which results in lowest chi-square.
+    
+    Parameters
+    ----------
+    chi_arr : numpy.ndarray
+        Array of chi-square values (see dedisperse_eclipse.py) with shape
+        ((N_subints, N_dm, N_tau))
+    snr_arr : numpy.ndarray, optional
+        Array of template scale-factors (see dedisperse_eclipse.py) with
+        shape ((N_subints, N_dm, N_tau)). If provided then the values
+        corresponding to the lowest chi-sq fit per sub-integration will be
+        plotted along with the DM and tau contour plots
+    subint_start : int, optional
+        First x-axis tick label, if the fits were made to only a subset of
+        the data
+    fignum : int, optional
+        Matplotlib figure number, if different from 1
+        
     """
-    Nsubint=chi_arr.shape[0]
-    subints=np.arange(subint_start,subint_start+Nsubint)
-    snr_fit=np.empty(Nsubint)
-    for i in np.arange(Nsubint):
-        coord=np.unravel_index(chi_arr[i].argmin(),chi_arr[i].shape)
-        snr_fit[i]=snr_arr[i][coord]
-    f=plt.figure(2)
-    ax=f.add_subplot(111,title='Amplitude of minimum chi-square fit',xlabel='Sub-integration',ylabel='Best fit amplitude')
-    ax.plot(subints,snr_fit)
+    Nsubint = chi_arr.shape[0]
+    subints = np.arange(subint_start, subint_start+Nsubint)
+    snr_fit = np.empty(Nsubint)
+    for i in range(Nsubint):
+        coord = np.unravel_index(chi_arr[i].argmin(), chi_arr[i].shape)
+        snr_fit[i] = snr_arr[i][coord]
+    f = plt.figure(fignum)
+    ax = f.add_subplot(111, title = 'Amplitude of minimum chi-square fit',
+                       xlabel='Sub-integration', ylabel='Best fit amplitude')
+    ax.plot(subints, snr_fit)
+    plt.show()
 
 def convert_tscat_steps(tscats,arr):
     int_arr=arr.astype(int)

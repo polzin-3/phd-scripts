@@ -9,7 +9,8 @@ from astropy.io import fits
 #	Extract_data
 #	Combine_data
 #	norm_multibeam
-#       norm_offpulse_baseline
+#   norm_offpulse
+#   norm_offpulse_mean
 #	norm_dm_baseline (inc. baseline_search)
 #	norm_fft_baseline
 #	fluxcal_fit
@@ -17,18 +18,26 @@ from astropy.io import fits
 #	dedisperse_subint
 #-----------------------------------------------------------
 
-def Extract_data(hdu,combine=False,field=5):
+def Extract_data(hdu, combine=False, field=5):
     """
-    If combine=False, takes hdu(=fits.open('<fitsfile>')) and extracts the
-        raw data, scale factors, offsets and weights and returns these.
+    Extracts pulsar data from a fits file and into a numpy array. The fits
+    file must first be read into python as: hdu = fits.open('<fitsfile>')
+    using astropy.io.fits
+    
+    If combine=False, takes hdu and extracts the raw data, scale factors,
+    offsets and weights and returns these.
     If combine=True, takes hdu and extracts as above, then calls Combine_data
         function to return the observed data with scales, offsets and weights
         applied.
+    
+    The field variable represents the index of the hdu structure that contains
+    the pulsar data.
+    
     """
-    dataval=hdu[field].data['DATA']
-    scl=hdu[field].data['DAT_SCL']
-    offs=hdu[field].data['DAT_OFFS']
-    wts=hdu[field].data['DAT_WTS']
+    dataval = hdu[field].data['DATA']
+    scl = hdu[field].data['DAT_SCL']
+    offs = hdu[field].data['DAT_OFFS']
+    wts = hdu[field].data['DAT_WTS']
     if combine is False:
         return dataval,scl,offs,wts
     else:
@@ -86,7 +95,29 @@ def norm_multibeam(on_src_data,off_src_data,b_line=False):
 
 #-----------------------------------------------------------------------------
 
-def norm_offpulse_baseline(data_in, off_left=0, off_right=-1):
+def norm_offpulse(data_in, off_left=0, off_right=-1):
+    """
+    Normalise data array by subtracting the mean of the pre-defined off-pulse
+    phase bins in each profile, then dividing by the standard deviation of
+    the same phase bins.
+    
+    data_in : numpy.array
+        Input data to be normalised (shape = nsub, nchan, nbin).
+    off_left : int, optional
+        Phase bin number defining the left of the off-pulse region.
+    off_right : int, optional
+        Phase bin number defining the right of the off-pulse region.
+    """
+    nsub, nchan = data_in.shape
+    norm = np.nanmean(data_in[:,:,off_left:off_right], axis=-1).reshape(nsub, nchan, 1)
+    data_out = data_in - norm
+    norm = np.nanstd(data_out[:,:,off_left:off_right], axis=-1).reshape(nsub, nchan, 1)
+    data_out /= norm
+    return data_out
+
+#-----------------------------------------------------------------------------
+
+def norm_offpulse_mean(data_in, off_left=0, off_right=-1):
     """
     Normalise data array by dividing by the mean of the pre-defined off-pulse
     phase bins in each profile.
@@ -97,8 +128,7 @@ def norm_offpulse_baseline(data_in, off_left=0, off_right=-1):
     off_right : int, optional
        	    Phase bin number defining the right of the off-pulse region.
     """
-    nsub = data_in.shape[0]
-    nchan = data_in.shape[1]
+    nsub, nchan = data_in.shape
     baseline_arr = np.empty((nsub, nchan))
     for i in range(nsub):
         for jj in range(nchan):

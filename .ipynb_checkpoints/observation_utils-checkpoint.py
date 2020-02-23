@@ -71,7 +71,6 @@ def mjd_to_orbph(par, mjd, savefile=False, outfile='orbph.txt'):
     """
     Returns array of orbital phases at given MJDs using Rene Breton's 
     my_binary_psr script.
-    
     par : string
          Path to ephemeris (.par) file for given pulsar.
     mjd : array

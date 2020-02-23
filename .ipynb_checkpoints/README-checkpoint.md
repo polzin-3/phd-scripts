@@ -1,7 +1,9 @@
 # phd-scripts
-Mix of python scripts developed throughout my PhD  for use with radio astronomy data.
+Mix of python scripts developed throughout my PhD  for use with radio astronomy data. Note that these were made for Python2 and are likely not compatible with python3
 
 The majority of these scripts are short, quick scripts to perform repeatable tasks on radio astronomy data. They were written specificly for my use cases, and definitely **not optimised**, so feel free to take them and improve.
+
+Note that psr_utils.py and my_binary_psr.py (Rene Breton) are not my scripts, but copies are provided here as they are sourced by some functions and thus are required for some of my scripts to run.
 
 dedidisperseLOFAR.py, observation_utils.py and normalise_data.py are the most in-depth, containing a number of functions that can be generally applied to data from different telescopes.
 
@@ -15,7 +17,9 @@ The input data should have sub-integrations, frequency channelisation, and pulse
 
 The input template is equally important in the success of the method. It should have as high signal-to-noise as possible, and be representative of the true pulse shape of the pulsar. A generally good method, if you have the available data, is to sum observed data over a long duration (out-of-eclipse and dedispersed) to give a relatively high S/N 2D template (freq chan, pulse phase) that can be further improved by applying a smoothing algorithm (e.g. Savitzky-Golay filter) to reduce noise. If you are using a full de-dispersed template, then it must be accurately phase-aligned with the data that you are trying to measure. For an eclipsing pulsar this can be achieved by cross-correlating the template with the de-dispersed, out-of-eclipse part of the observed data (see template_2d from normalise_data.py).
 
-The output data: chi-square array (best-fit chi-square for each sub-integration, DM & tau), amplitude array (template scale factor for best-fit of each sub-int, DM & tau) and amplitude error array (corresponding scale factor fit errors, not accounting for uncertainty in DM & tau), are saved to disk (as .txt) upon completion. When reading these into python you will first need to reshape the arrays into ((# of sub-ints, # of DMs, # of tau)). An automatic plot of the ...
+As the templates and data retain 2-dimensions (freq chan and pulse phase) in the fits, then they must both be correctly normalised prior to input. This means that the off-pulse baseline should be removed, and the pulse amplitudes scaled by a consistent method across all frequency channels. Some methods to do this are contained in the functions of normalise_data.py.
+
+The output data: chi-square array (best-fit chi-square for each sub-integration, DM & tau), amplitude array (template scale factor for best-fit of each sub-int, DM & tau) and amplitude error array (corresponding scale factor fit errors, not accounting for uncertainty in DM & tau), are saved to disk (as .txt) upon completion. When reading these into python you will first need to reshape the arrays into ((# of sub-ints, # of DMs, # of tau)). Automatic contour plots of the DM and tau vs sub-integration (contours of 1,2 and 3 sigma) can be made with the params_vs_time() function from chi_sq_plotter.py.
 
 ## normalise_data.py
 ---
